@@ -1,10 +1,10 @@
-FROM python:3.13.0-slim
+FROM python:3.11.10-slim-bookworm
 
 COPY requirements.txt .
 
 RUN pip3 install --upgrade pip
 
-RUN pip3 install -r /requirements.txt
+RUN pip3 install -r requirements.txt
 
 COPY . .
 
