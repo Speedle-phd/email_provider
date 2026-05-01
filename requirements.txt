@@ -4,3 +4,4 @@ flask-limiter==3.8.0
 python-dotenv==1.0.1
 validators==0.34.0
 gunicorn==23.0.0
+pymongo==4.10.1
