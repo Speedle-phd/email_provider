@@ -58,7 +58,7 @@ docker compose build
 docker compose run --rm --no-deps -v ./test_app.py:/app/test_app.py:ro email python -B -m unittest -v test_app
 ```
 
-## CI/CD:
+## CI/CD
 
 Pull requests and manual workflow runs build the production image, run tests,
 validate both Compose modes, and verify healthy startup. Pushes to `main` also
