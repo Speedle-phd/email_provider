@@ -171,8 +171,7 @@ curl --fail http://127.0.0.1:8085/health
 Use the script for the first deployment rather than starting unrecorded
 containers manually. If migrating an already-running instance, schedule a
 maintenance window: without recorded state, a failed first deploy removes
-the failed stack and restores the checkout, but cannot restore an unrecorded
-old image.
+the failed stack and restores the checkout, but cannot restore an unrecorded old image.
 
 ## Deploys and rollback
 
