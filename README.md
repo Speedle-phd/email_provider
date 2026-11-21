@@ -61,15 +61,9 @@ docker compose run --rm --no-deps -v ./test_app.py:/app/test_app.py:ro email pyt
 ## CI/CD
 
 Pull requests and manual workflow runs build the production image, run tests,
-validate both Compose modes, scan the image, and verify healthy startup. Pushes to `main` also
+validate both Compose modes, and verify healthy startup. Pushes to `main` also
 publish SHA-tagged images to GHCR and automatically deploy over restricted SSH.
 See [DEPLOY.md](DEPLOY.md) for server setup, GitHub secrets, and rollback.
-
-Trivy blocks publication and deployment for HIGH or CRITICAL vulnerabilities,
-including those without an available fix; scan errors also fail CI. A separate
-weekly workflow scans the latest published GHCR `:main` image without deploying.
-It may differ from the image running on the server. Review failed runs in GitHub
-Actions; configure GitHub notifications to receive workflow failure alerts.
 
 Dependabot checks Python requirements, the pinned Docker base image digest and
 GitHub Actions weekly and proposes updates as pull requests. Review the changes
