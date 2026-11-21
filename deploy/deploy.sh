@@ -6,8 +6,8 @@ fail() { log "ERROR: $*"; exit 1; }
 
 # Parse the whole function before checkout replaces this script.
 main() {
-    local app_dir=/docker/email_provider
-    local state_dir=/docker/email_provider-state
+    local app_dir=/docker/email-service
+    local state_dir=/docker/email-service-state
     local image=ghcr.io/speedle-phd/email_provider
     local sha="${SSH_ORIGINAL_COMMAND:-${1:-}}"
     local previous="" head
@@ -32,7 +32,7 @@ main() {
 
     compose() {
         APP_IMAGE="$image" APP_TAG="$1" docker compose \
-            --project-name email_provider --env-file .env -f docker-compose.yaml "${@:2}"
+            --project-name email-service --env-file .env -f docker-compose.yaml "${@:2}"
     }
     start() {
         compose "$1" up -d --no-build --pull never --wait --wait-timeout 300

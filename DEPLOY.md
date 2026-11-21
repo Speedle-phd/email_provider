@@ -26,15 +26,20 @@ notification API publicly or add a public reverse proxy.
 
 Run as an administrator, reusing the `deploy` user if it already exists:
 
+The commands below are for a **new installation**. For the existing checkout
+at `/docker/email-service`, do not clone over it, overwrite environment files,
+or regenerate the API token. Preserve the Compose project name `email-service`
+so deployment updates the existing service rather than creating another stack.
+
 ```sh
 sudo adduser --disabled-password --gecos "" deploy
 sudo usermod -aG docker deploy
-sudo mkdir -p /docker/email_provider /docker/email_provider-state
-sudo chown deploy:deploy /docker/email_provider /docker/email_provider-state
-sudo -u deploy git clone https://github.com/Speedle-phd/email_provider.git /docker/email_provider
-sudo -u deploy cp /docker/email_provider/.env.example /docker/email_provider/.env
-sudo -u deploy cp /docker/email_provider/.notification.env.example /docker/email_provider/.notification.env
-sudo chmod 600 /docker/email_provider/.env /docker/email_provider/.notification.env
+sudo mkdir -p /docker/email-service /docker/email-service-state
+sudo chown deploy:deploy /docker/email-service /docker/email-service-state
+sudo -u deploy git clone https://github.com/Speedle-phd/email_provider.git /docker/email-service
+sudo -u deploy cp /docker/email-service/.env.example /docker/email-service/.env
+sudo -u deploy cp /docker/email-service/.notification.env.example /docker/email-service/.notification.env
+sudo chmod 600 /docker/email-service/.env /docker/email-service/.notification.env
 ```
 
 Fill in both environment files before deploying. Generate `MAIL_API_TOKEN`
@@ -63,7 +68,7 @@ key out of this repository. Add its public key to the deploy user's
 `/home/deploy/.ssh/authorized_keys` as one line:
 
 ```text
-command="/bin/bash /docker/email_provider/deploy/deploy.sh",restrict ssh-ed25519 <public-key> github-actions-email-provider
+command="/bin/bash /docker/email-service/deploy/deploy.sh",restrict ssh-ed25519 <public-key> github-actions-email-provider
 ```
 
 The `.ssh` directory must be owned by `deploy` with mode 700, and
@@ -103,7 +108,7 @@ The first successful scripted deployment establishes rollback state.
 Run as `deploy`, substituting the full SHA of the successful image build:
 
 ```sh
-cd /docker/email_provider
+cd /docker/email-service
 bash deploy/deploy.sh <full-sha>
 docker compose ps
 curl --fail http://127.0.0.1:8085/health
@@ -122,7 +127,7 @@ without building, then waits up to 300 seconds for `/health`. Pull or startup
 failure restores the recorded previous checkout and cached image, and the CI
 job still fails. A rollback failure is reported explicitly.
 
-State lives at `/docker/email_provider-state/deployed-commit`, outside Git.
+State lives at `/docker/email-service-state/deployed-commit`, outside Git.
 On success the script atomically records the SHA and retags the local image
 as `:main`. A plain `docker compose up -d` therefore uses the deployed image
 already cached on the server. `docker compose pull` explicitly fetches the
@@ -131,7 +136,7 @@ registry's newest `:main`; use the script to avoid bypassing rollback state.
 To deploy or roll back manually, as `deploy`:
 
 ```sh
-cd /docker/email_provider
+cd /docker/email-service
 bash deploy/deploy.sh <full-sha-on-main>
 ```
 
@@ -144,7 +149,7 @@ Diagnostics:
 ```sh
 docker compose ps
 docker compose logs --tail 40 email
-cat /docker/email_provider-state/deployed-commit
+cat /docker/email-service-state/deployed-commit
 ```
 
 Application health does not prove SMTP delivery. Unit tests mock SMTP;
