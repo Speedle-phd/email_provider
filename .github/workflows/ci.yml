@@ -42,6 +42,21 @@ jobs:
           docker run --rm --read-only --tmpfs /tmp \
             --mount "type=bind,source=$PWD/test_app.py,target=/app/test_app.py,readonly" \
             "$APP_IMAGE:$APP_TAG" python -B -m unittest -v test_app
+      - name: Scan production image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_DISABLE_TELEMETRY: "true"
+          TRIVY_OFFLINE_SCAN: "true"
+          TRIVY_IMAGE_SRC: docker
+        with:
+          version: v0.70.0
+          image-ref: email-provider-ci:test
+          scanners: vuln
+          vuln-type: os,library
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: "false"
+          exit-code: "1"
       - name: Verify healthy production startup
         run: |
           docker compose up -d --no-build --pull never --wait --wait-timeout 120

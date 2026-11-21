@@ -4,13 +4,24 @@
 
 Pull requests, pushes to `main`, and manual runs execute the checks in
 [ci.yml](.github/workflows/ci.yml): Compose validation, production image build,
-unit tests inside that image, and healthy startup with test-only settings.
+unit tests inside that image, a vulnerability scan, and healthy startup with
+test-only settings. The scan blocks the pipeline for HIGH or CRITICAL findings
+(including unfixed findings) and fails closed on scanner errors.
 Only pushes to `main` publish `ghcr.io/speedle-phd/email_provider:<full-sha>`
 and `:main`, then deploy over SSH. Manual runs perform checks only.
 The tested image is transferred between jobs as a one-day artifact and pushed
 without rebuilding, so the deployed image is exactly the one tested.
 The third-party Docker login action is pinned to a verified commit SHA;
 GitHub's first-party checkout and artifact actions use their major tags.
+The Trivy action is also pinned to a commit and its scanner version is explicit.
+
+The weekly image security workflow scans the latest published `:main` image,
+not necessarily the SHA currently running on the server; it never deploys.
+Check failed runs in Actions and enable workflow failure notifications.
+It requires the GHCR package to be public as configured below. Dependabot opens
+weekly update PRs for pip, the Docker base image (including its pinned digest),
+and GitHub Actions. Review and merge those PRs only after CI passes. Enable
+Dependabot alerts and security updates in repository settings separately.
 
 Production is the default [Compose file](docker-compose.yaml). There is no
 database or persistent application data to back up. SMTP settings and the API
