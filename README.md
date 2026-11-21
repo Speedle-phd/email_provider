@@ -50,6 +50,25 @@ Send a JSON POST to
 `email`, `subject`, and `message`. The email must match the configured recipient.
 The response confirms SMTP submission, not final inbox delivery.
 
+To send a real test email from the host, run this from the checkout. It reads
+the token and recipient from `.notification.env`, so the token is not typed on
+the command line, and the subshell keeps them out of your current shell:
+
+```sh
+(
+  set -a; . ./.notification.env; set +a
+  curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:8085/api/v1/send_email \
+    -H 'Content-Type: application/json' \
+    -H "x-auth-token: $MAIL_API_TOKEN" \
+    -d "{\"email\":\"$MAIL_ALLOWED_RECIPIENT\",\"subject\":\"Test email\",\"message\":\"Test message from email-service.\"}"
+)
+```
+
+A successful request returns `{"status":"sent"}` with `HTTP 200`. A `401`
+response means the token is wrong; `403` means the recipient does not match
+`MAIL_ALLOWED_RECIPIENT`; `502` means the SMTP server rejected the message or
+could not be reached (see `docker compose logs email`).
+
 `GET /health` returns `{"status":"ok"}` without authentication or sending mail.
 It is exempt from rate limiting and verifies application startup, not SMTP
 availability.
