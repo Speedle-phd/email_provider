@@ -1,13 +1,15 @@
-FROM python:3.11.10-slim-bookworm
+FROM python:3.15.2-slim-bookworm
 
+WORKDIR /app
 COPY requirements.txt .
 
-RUN pip3 install --upgrade pip
+RUN pip3 install --no-cache-dir -r requirements.txt \
+    && useradd --system --no-create-home --uid 10001 app
 
-RUN pip3 install -r requirements.txt
+COPY app.py gunicorn_config.py ./
 
-COPY . .
+USER 10001
 
 EXPOSE 8085
 
-CMD [ "gunicorn","--config", "gunicorn_config.py", "app:app"]
+CMD ["gunicorn", "--config", "gunicorn_config.py", "app:app"]

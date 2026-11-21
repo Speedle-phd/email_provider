@@ -1,0 +1,10 @@
+.env
+.notification.env
+.git
+.gitignore
+__pycache__
+*.pyc
+*.log
+log
+.venv
+venv
