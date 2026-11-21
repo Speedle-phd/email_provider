@@ -26,7 +26,7 @@ def create_app():
     if not smtp_host or not smtp_port.isdigit() or not 1 <= int(smtp_port) <= 65535:
         raise ValueError("SMTP_HOST must be set and SMTP_PORT must be 1-65535")
     smtp_port = int(smtp_port)
-
+    # test
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
     limiter = Limiter(
