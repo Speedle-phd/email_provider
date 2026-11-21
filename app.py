@@ -21,6 +21,11 @@ def create_app():
         raise ValueError("MAIL_API_TOKEN must contain at least 32 ASCII characters")
     if validators.email(recipient) is not True:
         raise ValueError("A valid MAIL_ALLOWED_RECIPIENT is required")
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.ionos.de").strip()
+    smtp_port = os.environ.get("SMTP_PORT", "587").strip()
+    if not smtp_host or not smtp_port.isdigit() or not 1 <= int(smtp_port) <= 65535:
+        raise ValueError("SMTP_HOST must be set and SMTP_PORT must be 1-65535")
+    smtp_port = int(smtp_port)
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
@@ -66,7 +71,7 @@ def create_app():
         mail["Subject"] = subject
         mail.set_content(message)
         try:
-            with smtplib.SMTP("smtp.ionos.de", 587, timeout=30) as connection:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as connection:
                 connection.starttls(context=ssl.create_default_context())
                 connection.login(sender, password)
                 connection.send_message(mail)

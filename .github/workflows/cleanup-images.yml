@@ -1,0 +1,25 @@
+name: Clean up old GHCR images
+
+on:
+  schedule:
+    - cron: "41 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Keep the newest package versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      # Each release creates an image version plus an attestation version, so
+      # 40 versions keep roughly the last 20 releases available for rollback.
+      - uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          package-name: email_provider
+          package-type: container
+          min-versions-to-keep: 40

@@ -1,0 +1,3 @@
+# CI-only lint tools. Regenerate requirements-lint.txt after editing (see README.md).
+ruff==0.17.4
+zizmor==1.32.0

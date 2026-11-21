@@ -67,9 +67,24 @@ class EmailServiceTests(unittest.TestCase):
         self.assertNotIn(b"sensitive", response.data)
 
     def test_missing_or_weak_configuration_fails_at_startup(self):
-        with patch.dict(os.environ, {"MAIL_API_TOKEN": "short"}):
-            with self.assertRaises(ValueError):
+        with patch.dict(os.environ, {"MAIL_API_TOKEN": "short"}), self.assertRaises(ValueError):
+            create_app()
+        for port in ("", "abc", "0", "70000"):
+            with (
+                self.subTest(port=port),
+                patch.dict(os.environ, {"SMTP_PORT": port}),
+                self.assertRaises(ValueError),
+            ):
                 create_app()
+
+    @patch("app.smtplib.SMTP")
+    def test_smtp_server_defaults_to_ionos_and_is_configurable(self, smtp):
+        self.assertEqual(self.post().status_code, 200)
+        self.assertEqual(smtp.call_args.args, ("smtp.ionos.de", 587))
+        with patch.dict(os.environ, {"SMTP_HOST": "smtp.example.com", "SMTP_PORT": "2587"}):
+            client = create_app().test_client()
+        client.post("/api/v1/send_email", json=self.payload, headers=self.headers)
+        self.assertEqual(smtp.call_args.args, ("smtp.example.com", 2587))
 
     @patch("app.smtplib.SMTP")
     def test_health_checks_are_public_and_do_not_consume_mail_rate_limit(self, smtp):

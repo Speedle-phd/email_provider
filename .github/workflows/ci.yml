@@ -17,7 +17,37 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Tool images are pinned by digest; Dependabot does not update these two lines.
+  TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+  ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+
 jobs:
+  lint:
+    name: Lint Python, workflows, and deploy script
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install hash-locked lint tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lint"
+          "$RUNNER_TEMP/lint/bin/pip" install --quiet --require-hashes -r requirements-lint.txt
+          echo "$RUNNER_TEMP/lint/bin" >> "$GITHUB_PATH"
+      - name: Ruff
+        run: |
+          ruff check --output-format=github .
+          ruff format --check .
+      - name: Workflow security (zizmor)
+        run: zizmor --offline --format=github .github/workflows
+      - name: Workflow syntax (actionlint) and deploy script (shellcheck)
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color
+          docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck \
+            "$ACTIONLINT_IMAGE" deploy/deploy.sh
+
   checks:
     name: Production image, tests, and startup
     runs-on: ubuntu-latest
@@ -27,6 +57,8 @@ jobs:
       APP_TAG: test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Create test-only configuration
         run: |
           cp .env.example .env
@@ -57,25 +89,36 @@ jobs:
           docker compose logs --tail 40
           docker compose down
       - name: Export tested image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: docker save "$APP_IMAGE:$APP_TAG" | gzip > "$RUNNER_TEMP/email-provider-image.tar.gz"
+        run: docker save --output "$RUNNER_TEMP/email-provider-image.tar" "$APP_IMAGE:$APP_TAG"
+      # Informational: the weekly security workflow reports to the Security tab
+      # and fails on fixable HIGH/CRITICAL findings.
+      - name: Vulnerability report (non-blocking)
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$RUNNER_TEMP:/scan:ro" -e TRIVY_DISABLE_TELEMETRY=true \
+            "$TRIVY_IMAGE" image --input /scan/email-provider-image.tar \
+            --scanners vuln --severity HIGH,CRITICAL --no-progress --exit-code 0
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: tested-production-image
-          path: ${{ runner.temp }}/email-provider-image.tar.gz
+          path: ${{ runner.temp }}/email-provider-image.tar
           if-no-files-found: error
           retention-days: 1
 
   images:
     name: Publish production image
-    needs: [checks]
+    needs: [lint, checks]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -90,14 +133,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the exact tested image (no rebuild)
+        id: push
         env:
           IMAGE: ${{ steps.name.outputs.image }}
         run: |
-          docker load --input "$RUNNER_TEMP/email-provider-image.tar.gz"
+          docker load --input "$RUNNER_TEMP/email-provider-image.tar"
           docker tag email-provider-ci:test "$IMAGE:$GITHUB_SHA"
           docker tag email-provider-ci:test "$IMAGE:main"
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:main"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Unexpected digest: $digest"; exit 1; }
+          echo "Published $IMAGE@$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   deploy:
     name: Deploy to server
@@ -110,15 +163,17 @@ jobs:
       group: deploy-production
       cancel-in-progress: false
     steps:
-      - name: Deploy tested commit
+      - name: Deploy tested commit by image digest
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DIGEST: ${{ needs.images.outputs.digest }}
         run: |
           : "${SSH_HOST:?Set SSH_HOST}"
           : "${SSH_PRIVATE_KEY:?Set SSH_PRIVATE_KEY}"
           : "${SSH_KNOWN_HOSTS:?Set SSH_KNOWN_HOSTS}"
+          : "${DIGEST:?Missing image digest}"
           install -m 700 -d ~/.ssh
           trap 'rm -f ~/.ssh/deploy_key' EXIT
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -126,4 +181,4 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh -i ~/.ssh/deploy_key -p 22 -o BatchMode=yes \
             -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
-            "deploy@$SSH_HOST" "$GITHUB_SHA"
+            "deploy@$SSH_HOST" "$GITHUB_SHA $DIGEST"

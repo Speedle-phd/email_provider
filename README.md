@@ -1,8 +1,11 @@
 # Local notification email service
 
 The service accepts authenticated requests from the host on `127.0.0.1:8085`
-and sends only to the address in `MAIL_ALLOWED_RECIPIENT`. It uses the IONOS
-SMTP account configured by `EMAIL` and `EMAIL_PW` in `.env`.
+and sends only to the address in `MAIL_ALLOWED_RECIPIENT`. It uses the SMTP
+account configured by `EMAIL` and `EMAIL_PW` in `.env`. The server defaults to
+IONOS (`smtp.ionos.de`, port 587); set `SMTP_HOST` and `SMTP_PORT` in `.env` to
+use another provider. The connection always uses STARTTLS, so the port must
+support it (587 usually does; implicit-TLS port 465 does not work).
 
 Store `MAIL_API_TOKEN` and `MAIL_ALLOWED_RECIPIENT` in `.notification.env`.
 Both environment files must be readable only by the service operator and must
@@ -60,15 +63,34 @@ docker compose run --rm --no-deps -v ./test_app.py:/app/test_app.py:ro email pyt
 
 ## CI/CD
 
-Pull requests and manual workflow runs build the production image, run tests,
-validate both Compose modes, and verify healthy startup. Pushes to `main` also
-publish SHA-tagged images to GHCR and automatically deploy over restricted SSH.
-See [DEPLOY.md](DEPLOY.md) for server setup, GitHub secrets, and rollback.
+Pull requests and manual workflow runs lint the code and workflows, build the
+production image, run tests, validate both Compose modes, and verify healthy
+startup. Pushes to `main` also publish SHA-tagged images with a provenance
+attestation to GHCR and deploy them by digest over restricted SSH. A weekly
+workflow scans the published image for vulnerabilities, and another removes old
+GHCR versions. See [DEPLOY.md](DEPLOY.md) for details, server setup, GitHub
+secrets, and rollback.
 
 Dependabot checks Python requirements, the pinned Docker base image digest and
 GitHub Actions weekly and proposes updates as pull requests. Review the changes
 and CI results before merging. Dependabot version updates are not a substitute
 for enabling Dependabot alerts and security updates in repository settings.
+
+## Dependencies
+
+`requirements.in` lists the direct dependencies; `requirements.txt` is generated
+from it with every transitive package pinned and hashed, and the image installs
+it with `--require-hashes`. `requirements-lint.in`/`requirements-lint.txt` do
+the same for CI's lint tools. After editing an `.in` file, regenerate its lock
+file with the same Python as the image:
+
+```sh
+docker run --rm -v "$PWD:/src" -w /src python:3.15.2-slim-trixie sh -c \
+  'pip install -q pip-tools && pip-compile -q --generate-hashes --strip-extras --allow-unsafe requirements.in'
+```
+
+Use `requirements-lint.in` in place of `requirements.in` for the lint tools.
+Dependabot understands this layout and updates both files in one PR.
 
 The rate limit is local to the service's single Gunicorn worker. Do not expose
 the port to a network or increase the worker count without adding a shared

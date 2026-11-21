@@ -3,13 +3,37 @@
 ## Pipeline
 
 Pull requests, pushes to `main`, and manual runs execute the checks in
-[ci.yml](.github/workflows/ci.yml): Compose validation, production image build,
-unit tests inside that image, and healthy startup with test-only settings.
+[ci.yml](.github/workflows/ci.yml):
+
+- **Lint:** ruff (Python), zizmor (workflow security), actionlint (workflow
+  syntax) and shellcheck (`deploy/deploy.sh`).
+- **Checks:** Compose validation, production image build, unit tests inside that
+  image, healthy startup with test-only settings, and a non-blocking Trivy
+  report of HIGH/CRITICAL vulnerabilities in the job log.
+
 Only pushes to `main` publish `ghcr.io/speedle-phd/email_provider:<full-sha>`
-and `:main`, then deploy over SSH. Manual runs perform checks only.
-The tested image is transferred between jobs as a one-day artifact and pushed
-without rebuilding, so the deployed image is exactly the one tested.
+and `:main`, record a signed build provenance attestation, then deploy over SSH.
+Manual runs perform checks only. The tested image is transferred between jobs
+as a one-day artifact and pushed without rebuilding. CI sends the server the
+commit SHA **and the pushed image digest**; the server pulls by digest, so it
+runs exactly the bytes that were tested even if a tag were overwritten.
 All actions are pinned to full commit SHAs with the version in a comment.
+The Trivy and actionlint container images are pinned by digest in the
+workflows' `env:` blocks; Dependabot does not update those, so bump them by hand.
+
+[security.yml](.github/workflows/security.yml) scans the published `:main` image
+every Monday: all findings go to the repository's **Security → Code scanning**
+tab, and the run fails (sending GitHub's failure email) when a HIGH or CRITICAL
+vulnerability has a fix available.
+[cleanup-images.yml](.github/workflows/cleanup-images.yml) deletes all but the
+newest 40 GHCR package versions every Sunday (about 20 releases, since each
+release also stores an attestation).
+
+To check an image's provenance yourself (requires the GitHub CLI):
+
+```sh
+gh attestation verify oci://ghcr.io/speedle-phd/email_provider:<full-sha> --owner Speedle-phd
+```
 Pushes to `main` that change only Markdown files or `.github/dependabot.yml`
 skip the pipeline, so they neither rebuild nor restart production.
 Dependabot opens weekly update PRs for pip, the Docker base image (including its
@@ -22,8 +46,19 @@ Dependabot alerts and security updates in repository settings separately.
 Production is the default [Compose file](docker-compose.yaml). There is no
 database or persistent application data to back up. SMTP settings and the API
 token stay on the server. Back these files up securely outside the checkout;
-the deploy script neither copies secrets nor changes them. Deployment retains
-images, including the current and previous SHA, and never prunes host images.
+the deploy script neither copies secrets nor changes them. After a successful
+deploy the script removes this app's older release images from the server,
+keeping only the current and previous SHA (the rollback target). It never
+touches other images.
+
+### Required checks on `main` (repository setting)
+
+To stop untested commits from deploying, add a ruleset under **Settings →
+Rules → Rulesets → New branch ruleset**: target the default branch, enable
+**Require a pull request before merging** and **Require status checks to
+pass**, and add the checks `Lint Python, workflows, and deploy script` and
+`Production image, tests, and startup`. Direct pushes to `main` are then
+rejected; changes land through pull requests.
 
 ## Server preparation (Linux, amd64)
 
@@ -106,6 +141,18 @@ it private, log in to GHCR on the server as `deploy` with a `read:packages` toke
 
 ## Bootstrap and verify
 
+**Upgrading a server that runs the older `deploy.sh`:** the old script accepts
+only a SHA, so the first CI deploy that also sends a digest fails before
+touching anything (production keeps running). Run the new script once by hand,
+as `deploy`, with that commit's SHA; afterwards the server has the new script
+and CI deploys work again:
+
+```sh
+cd /docker/email-service
+git fetch origin main && git show FETCH_HEAD:deploy/deploy.sh > /tmp/deploy.sh
+bash /tmp/deploy.sh <full-sha-of-the-failed-run> && rm /tmp/deploy.sh
+```
+
 Commit and push this setup yourself. CI can publish before the server has the
 script; prepare the checkout above (or update an existing clean checkout)
 to a commit containing it, then rerun the failed deployment job. Ensure the
@@ -129,8 +176,9 @@ old image.
 
 ## Deploys and rollback
 
-Each deploy fetches `main`, checks out the requested SHA, pulls its image
-without building, then waits up to 300 seconds for `/health`. Pull or startup
+Each deploy fetches `main`, checks out the requested SHA, pulls its image by
+digest (or by SHA tag when run manually without a digest) without building,
+then waits up to 300 seconds for `/health`. Pull or startup
 failure restores the recorded previous checkout and cached image, and the CI
 job still fails. A rollback failure is reported explicitly.
 
