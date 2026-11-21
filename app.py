@@ -24,12 +24,17 @@ def create_app():
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
-    Limiter(
+    limiter = Limiter(
         get_remote_address,
         app=app,
         storage_uri="memory://",
         default_limits=["10 per minute"],
     )
+
+    @app.get("/health")
+    @limiter.exempt
+    def health():
+        return jsonify(status="ok")
 
     @app.route("/api/v1/send_email", methods=["POST"])
     def email():

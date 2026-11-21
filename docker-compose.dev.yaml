@@ -1,0 +1,10 @@
+services:
+  email:
+    image: email-provider-dev:local
+    pull_policy: build
+    command: ["gunicorn", "--config", "gunicorn_config.py", "--reload", "--reload-engine", "poll", "app:app"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - .:/app:ro
+    restart: "no"

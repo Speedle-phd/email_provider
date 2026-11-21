@@ -1,5 +1,6 @@
 services:
   email:
+    image: ${APP_IMAGE:-ghcr.io/speedle-phd/email_provider}:${APP_TAG:-main}
     build:
       context: .
       dockerfile: Dockerfile
@@ -17,3 +18,9 @@ services:
       - no-new-privileges:true
     pids_limit: 64
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

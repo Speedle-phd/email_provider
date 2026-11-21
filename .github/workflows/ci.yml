@@ -1,0 +1,125 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Production image, tests, and startup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_IMAGE: email-provider-ci
+      APP_TAG: test
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create test-only configuration
+        run: |
+          cp .env.example .env
+          cp .notification.env.example .notification.env
+      - name: Validate production and development Compose
+        run: |
+          bash -n deploy/deploy.sh
+          docker compose config --quiet
+          docker compose -f docker-compose.yaml -f docker-compose.dev.yaml config --quiet
+      - name: Build production image
+        run: |
+          docker build --platform linux/amd64 -t "$APP_IMAGE:$APP_TAG" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+      - name: Run tests with the production runtime and dependencies
+        run: |
+          docker run --rm --read-only --tmpfs /tmp \
+            --mount "type=bind,source=$PWD/test_app.py,target=/app/test_app.py,readonly" \
+            "$APP_IMAGE:$APP_TAG" python -B -m unittest -v test_app
+      - name: Verify healthy production startup
+        run: |
+          docker compose up -d --no-build --pull never --wait --wait-timeout 120
+          curl --fail --silent --show-error http://127.0.0.1:8085/health
+      - name: Diagnostics and cleanup
+        if: always()
+        run: |
+          docker compose ps
+          docker compose logs --tail 40
+          docker compose down
+      - name: Export tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save "$APP_IMAGE:$APP_TAG" | gzip > "$RUNNER_TEMP/email-provider-image.tar.gz"
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: tested-production-image
+          path: ${{ runner.temp }}/email-provider-image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  images:
+    name: Publish production image
+    needs: [checks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: tested-production-image
+          path: ${{ runner.temp }}
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the exact tested image (no rebuild)
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+        run: |
+          docker load --input "$RUNNER_TEMP/email-provider-image.tar.gz"
+          docker tag email-provider-ci:test "$IMAGE:$GITHUB_SHA"
+          docker tag email-provider-ci:test "$IMAGE:main"
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:main"
+
+  deploy:
+    name: Deploy to server
+    needs: [images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy tested commit
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          : "${SSH_HOST:?Set SSH_HOST}"
+          : "${SSH_PRIVATE_KEY:?Set SSH_PRIVATE_KEY}"
+          : "${SSH_KNOWN_HOSTS:?Set SSH_KNOWN_HOSTS}"
+          install -m 700 -d ~/.ssh
+          trap 'rm -f ~/.ssh/deploy_key' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -p 22 -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "deploy@$SSH_HOST" "$GITHUB_SHA"

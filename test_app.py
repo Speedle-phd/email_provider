@@ -72,6 +72,17 @@ class EmailServiceTests(unittest.TestCase):
                 create_app()
 
     @patch("app.smtplib.SMTP")
+    def test_health_checks_are_public_and_do_not_consume_mail_rate_limit(self, smtp):
+        for _ in range(15):
+            response = self.client.get("/health")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json, {"status": "ok"})
+        for _ in range(10):
+            self.assertEqual(self.post(headers={}).status_code, 401)
+        self.assertEqual(self.post(headers={}).status_code, 429)
+        smtp.assert_not_called()
+
+    @patch("app.smtplib.SMTP")
     def test_requests_are_rate_limited(self, smtp):
         for _ in range(10):
             self.assertEqual(self.post(headers={}).status_code, 401)
