@@ -1,0 +1,14 @@
+# CI tool images, pinned by digest. They live in a Compose file only so that
+# Dependabot's docker-compose ecosystem keeps them updated; the workflows run them
+# with `docker compose -f .github/compose.tools.yaml run --rm -T <service> …`.
+name: ci-tools
+
+services:
+  trivy:
+    image: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+    environment:
+      TRIVY_DISABLE_TELEMETRY: "true"
+
+  # Also contains shellcheck (run with --entrypoint shellcheck).
+  actionlint:
+    image: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667

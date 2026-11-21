@@ -5,8 +5,11 @@
 Pull requests, pushes to `main`, and manual runs execute the checks in
 [ci.yml](.github/workflows/ci.yml):
 
-- **Lint:** ruff (Python), zizmor (workflow security), actionlint (workflow
-  syntax) and shellcheck (`deploy/deploy.sh`).
+- **Dependency review** (pull requests only): fails when a PR adds or upgrades
+  to a dependency with a known HIGH or CRITICAL vulnerability.
+- **Lint:** ruff (Python), zizmor (workflow security, online mode so it also
+  checks that every pinned action SHA really belongs to that action's repository),
+  actionlint (workflow syntax) and shellcheck (`deploy/deploy.sh`).
 - **Checks:** Compose validation, production image build, unit tests inside that
   image, healthy startup with test-only settings, and a non-blocking Trivy
   report of HIGH/CRITICAL vulnerabilities in the job log.
@@ -15,11 +18,15 @@ Only pushes to `main` publish `ghcr.io/speedle-phd/email_provider:<full-sha>`
 and `:main`, record a signed build provenance attestation, then deploy over SSH.
 Manual runs perform checks only. The tested image is transferred between jobs
 as a one-day artifact and pushed without rebuilding. CI sends the server the
-commit SHA **and the pushed image digest**; the server pulls by digest, so it
-runs exactly the bytes that were tested even if a tag were overwritten.
+commit SHA **and the pushed image digest**; the server pulls by digest, so a
+tag overwritten in the registry between push and deploy cannot change what runs.
+(Anyone who can push to `main` controls the deploy anyway; the ruleset below is
+what guards that.) The provenance attestation is a verifiable record, not a gate:
+the server does not check it.
 All actions are pinned to full commit SHAs with the version in a comment.
-The Trivy and actionlint container images are pinned by digest in the
-workflows' `env:` blocks; Dependabot does not update those, so bump them by hand.
+The Trivy and actionlint images are pinned by digest in
+[.github/compose.tools.yaml](.github/compose.tools.yaml), which exists so that
+Dependabot can update them; the workflows run them with `docker compose run`.
 
 [security.yml](.github/workflows/security.yml) scans the published `:main` image
 every Monday: all findings go to the repository's **Security → Code scanning**
@@ -37,8 +44,10 @@ gh attestation verify oci://ghcr.io/speedle-phd/email_provider:<full-sha> --owne
 Pushes to `main` that change only Markdown files or `.github/dependabot.yml`
 skip the pipeline, so they neither rebuild nor restart production.
 Dependabot opens weekly update PRs for pip, the Docker base image (including its
-pinned digest), and GitHub Actions. It waits three days after a release before
-proposing it, groups minor/patch pip updates and all action updates into one PR
+pinned digest), GitHub Actions, and the CI tool images. It waits seven days after
+a release before proposing it (newly published versions are where hijacked
+releases appear before they are noticed and pulled; security updates are not
+delayed), groups minor/patch pip updates and all action updates into one PR
 each, and prefixes commits with `deps`. Review and merge those PRs only after CI
 passes; merging deploys automatically. Enable
 Dependabot alerts and security updates in repository settings separately.
@@ -56,9 +65,16 @@ touches other images.
 To stop untested commits from deploying, add a ruleset under **Settings →
 Rules → Rulesets → New branch ruleset**: target the default branch, enable
 **Require a pull request before merging** and **Require status checks to
-pass**, and add the checks `Lint Python, workflows, and deploy script` and
+pass**, and add the checks `Dependency review`,
+`Lint Python, workflows, and deploy script` and
 `Production image, tests, and startup`. Direct pushes to `main` are then
 rejected; changes land through pull requests.
+
+Also enable **Settings → Actions → General → Actions permissions → Require
+actions to be pinned to a full-length commit SHA**. GitHub then refuses to run
+any workflow step that uses an action by tag, so a future edit cannot quietly
+undo the pinning. Dependency review needs the dependency graph, which is on by
+default for public repositories (**Settings → Advanced Security**).
 
 ## Server preparation (Linux, amd64)
 

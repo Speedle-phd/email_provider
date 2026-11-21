@@ -18,11 +18,21 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Tool images are pinned by digest; Dependabot does not update these two lines.
-  TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
-  ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+  # Tool images (Trivy, actionlint) are pinned in this file, which Dependabot updates.
+  TOOLS: .github/compose.tools.yaml
 
 jobs:
+  # Blocks pull requests that add dependencies with known HIGH/CRITICAL vulnerabilities.
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
   lint:
     name: Lint Python, workflows, and deploy script
     runs-on: ubuntu-latest
@@ -40,13 +50,17 @@ jobs:
         run: |
           ruff check --output-format=github .
           ruff format --check .
+      # Online mode (token) enables the audits that check pinned SHAs really belong
+      # to the action's repository (impostor-commit) and flag known-vulnerable actions.
       - name: Workflow security (zizmor)
-        run: zizmor --offline --format=github .github/workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --format=github .github/workflows
       - name: Workflow syntax (actionlint) and deploy script (shellcheck)
         run: |
-          docker run --rm -v "$PWD:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color
-          docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck \
-            "$ACTIONLINT_IMAGE" deploy/deploy.sh
+          docker compose -f "$TOOLS" run --rm -T -v "$PWD:/repo:ro" -w /repo actionlint -color
+          docker compose -f "$TOOLS" run --rm -T -v "$PWD:/repo:ro" -w /repo \
+            --entrypoint shellcheck actionlint deploy/deploy.sh
 
   checks:
     name: Production image, tests, and startup
@@ -68,6 +82,7 @@ jobs:
           bash -n deploy/deploy.sh
           docker compose config --quiet
           docker compose -f docker-compose.yaml -f docker-compose.dev.yaml config --quiet
+          docker compose -f "$TOOLS" config --quiet
       - name: Build production image
         run: |
           docker build --platform linux/amd64 -t "$APP_IMAGE:$APP_TAG" \
@@ -95,8 +110,8 @@ jobs:
       - name: Vulnerability report (non-blocking)
         continue-on-error: true
         run: |
-          docker run --rm -v "$RUNNER_TEMP:/scan:ro" -e TRIVY_DISABLE_TELEMETRY=true \
-            "$TRIVY_IMAGE" image --input /scan/email-provider-image.tar \
+          docker compose -f "$TOOLS" run --rm -T -v "$RUNNER_TEMP:/scan:ro" trivy \
+            image --input /scan/email-provider-image.tar \
             --scanners vuln --severity HIGH,CRITICAL --no-progress --exit-code 0
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

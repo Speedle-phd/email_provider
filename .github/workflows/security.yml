@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 env:
-  # Pinned by digest; Dependabot does not update this line. Keep in sync with ci.yml.
-  TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+  # The Trivy image is pinned in this file, which Dependabot updates.
+  TOOLS: .github/compose.tools.yaml
 
 jobs:
   scan:
@@ -22,6 +22,9 @@ jobs:
       packages: read
       security-events: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -35,16 +38,16 @@ jobs:
           docker save --output "$RUNNER_TEMP/scan/image.tar" "$image"
       - name: Report all findings to the Security tab
         run: |
-          docker run --rm -v "$RUNNER_TEMP/scan:/scan" -e TRIVY_DISABLE_TELEMETRY=true \
-            "$TRIVY_IMAGE" image --input /scan/image.tar --scanners vuln \
+          docker compose -f "$TOOLS" run --rm -T -v "$RUNNER_TEMP/scan:/scan" trivy \
+            image --input /scan/image.tar --scanners vuln \
             --format sarif --output /scan/trivy.sarif --no-progress
-      - uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: ${{ runner.temp }}/scan/trivy.sarif
           category: trivy-image
       # A failed run triggers GitHub's failure notification when action is possible.
       - name: Fail on fixable HIGH or CRITICAL vulnerabilities
         run: |
-          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -e TRIVY_DISABLE_TELEMETRY=true \
-            "$TRIVY_IMAGE" image --input /scan/image.tar --scanners vuln \
+          docker compose -f "$TOOLS" run --rm -T -v "$RUNNER_TEMP/scan:/scan:ro" trivy \
+            image --input /scan/image.tar --scanners vuln \
             --severity HIGH,CRITICAL --ignore-unfixed --no-progress --exit-code 1
