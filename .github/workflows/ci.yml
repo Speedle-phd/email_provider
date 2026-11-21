@@ -3,6 +3,10 @@ name: CI/CD
 on:
   push:
     branches: [main]
+    # Docs and Dependabot config do not change the image; skip rebuild and redeploy.
+    paths-ignore:
+      - "**.md"
+      - ".github/dependabot.yml"
   pull_request:
   workflow_dispatch:
 
@@ -22,7 +26,7 @@ jobs:
       APP_IMAGE: email-provider-ci
       APP_TAG: test
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Create test-only configuration
         run: |
           cp .env.example .env
@@ -55,7 +59,7 @@ jobs:
       - name: Export tested image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: docker save "$APP_IMAGE:$APP_TAG" | gzip > "$RUNNER_TEMP/email-provider-image.tar.gz"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: tested-production-image
@@ -73,7 +77,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-production-image
           path: ${{ runner.temp }}

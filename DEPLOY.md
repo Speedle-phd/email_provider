@@ -9,11 +9,14 @@ Only pushes to `main` publish `ghcr.io/speedle-phd/email_provider:<full-sha>`
 and `:main`, then deploy over SSH. Manual runs perform checks only.
 The tested image is transferred between jobs as a one-day artifact and pushed
 without rebuilding, so the deployed image is exactly the one tested.
-The third-party Docker login action is pinned to a verified commit SHA;
-GitHub's first-party checkout and artifact actions use their major tags.
+All actions are pinned to full commit SHAs with the version in a comment.
+Pushes to `main` that change only Markdown files or `.github/dependabot.yml`
+skip the pipeline, so they neither rebuild nor restart production.
 Dependabot opens weekly update PRs for pip, the Docker base image (including its
-pinned digest), and GitHub Actions. Review and merge those PRs only after CI
-passes. Enable
+pinned digest), and GitHub Actions. It waits three days after a release before
+proposing it, groups minor/patch pip updates and all action updates into one PR
+each, and prefixes commits with `deps`. Review and merge those PRs only after CI
+passes; merging deploys automatically. Enable
 Dependabot alerts and security updates in repository settings separately.
 
 Production is the default [Compose file](docker-compose.yaml). There is no
